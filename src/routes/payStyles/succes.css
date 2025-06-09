@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans&family=Great+Vibes&family=Parisienne&display=swap');
+
+*{
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    text-decoration: none;
+    list-style-type: none;
+    font-family: 'DM Sans', sans-serif;
+   background-color:  rgb(199, 198, 198);
+
+}
+
+.succes_h1{
+    padding-left: 30px;
+    /* padding-top: 5px; */
+    font-size: 25px;
+    background-color: inherit;
+    border-radius: 15px;
+}
+.succes_img {
+    width: 70px;
+    height: 70px;
+    margin-left: 40%;
+    margin-top: 20px;
+    background-color: inherit;
+
+}
+
+.contenedor_succes{
+    width: 400px;
+    height: 310px;
+    margin-left: 30%;
+    margin-top: 10%;
+    background-color: aqua;
+    border-radius: 15px;
+    box-shadow: 10px 10px 19px -7px rgba(0,0,0,0.75);
+-webkit-box-shadow: 10px 10px 19px -7px rgba(0,0,0,0.75);
+-moz-box-shadow: 10px 10px 19px -7px rgba(0,0,0,0.75);
+    background-color: #fcfcfc;
+}
+
+.succes_a{
+    text-transform: lowercase;
+    color: rgb(5, 168, 5);
+    /* border: 1px solid black; */
+    /* border-radius: 15px; */
+    padding: 2px;
+    margin-left: 30%;
+    background-color: inherit;
+}
+
+.succes_ul{
+    background-color: inherit;
+    margin-left: 25px;
+}
+
+.succes_li{
+    background-color: inherit;
+
+}
+
+.succes_p{
+    background-color: inherit;
+    margin-left: 25px;
+    margin-top: 20px;
+}
+
+.succes_svg{
+    background-color: inherit;
+    width: 20px;
+    height: 20px;
+    color: green;
+    margin-left: 10px;
+    margin-top: 10px;
+    cursor: pointer;
+}
+
+.contenedor_succes > a{
+    background-color: inherit;
+}
