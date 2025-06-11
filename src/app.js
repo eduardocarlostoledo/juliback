@@ -9,6 +9,8 @@ const morgan = require("morgan");
 const helmet = require("helmet");
 const mercadopago = require("mercadopago");
 const routes = require("./routes/index.js");
+const rateLimit = require('express-rate-limit');
+const xss = require("xss-clean");
 // const crypto = require('crypto');
 require("./db.js");
 
@@ -29,12 +31,8 @@ if (ACCESS_TOKEN_MERCADOPAGO) {
 
 // Variables para URLs comunes
 const whitelist = [
-  "https://modatotal.netlify.app",
-  "modatotal.netlify.app",
-  "localhost:3000",
-  "localhost:3001",  
-  "localhost:5173",
-  "localhost:3001",
+  "https://july-marroquineria.netlify.app",  
+  "https://modatotal.netlify.app",  
   "http://localhost:3001",
   "http://localhost:5173",
   "https://elgatonegropremium.netlify.app",
@@ -58,6 +56,28 @@ const whitelist = [
 //   next();
 // });
 
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100, // Límite por IP
+  message: "Demasiadas peticiones desde esta IP, intentá más tarde.",
+});
+
+// Configuración de CORS
+const corsOptions = {
+  origin: (origin, callback) => {
+    const cleanOrigin = origin?.replace(/\/$/, ""); // elimina la barra final
+    if (!origin || whitelist.includes(cleanOrigin) || origin === "null") {
+      console.log(`✅ CORS permitido para ${origin}`);
+      callback(null, true);
+    } else {
+      console.error(`❌ CORS rechazado para ${origin}`);
+      callback(new Error("No permitido por CORS"));
+    }
+  },
+  credentials: true,
+};
+
+server.use(cors(corsOptions));
 // Middleware de seguridad
 server.use(
   helmet({
@@ -86,6 +106,8 @@ server.use(
   })
 );
 
+server.use(limiter);
+server.use(xss());
 //esto es para que no exista colision entre helmet y el inicio de sesion de google que requiere permisos "especiales"
 server.use ( (req, res, next) => {
   res.setHeader(
@@ -105,20 +127,7 @@ server.use(
 );
 server.use(helmet.hidePoweredBy());
 
-// Configuración de CORS
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || whitelist.includes(origin)) {
-      console.log(`CORS permitido para ${origin}`);
-      callback(null, true);
-    } else {
-      console.error(`CORS rechazado para ${origin}`);
-      callback(new Error("No permitido por CORS"));
-    }
-  },
-  credentials: true,
-};
-server.use(cors(corsOptions));
+
 
 // Otros middlewares
 server.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
