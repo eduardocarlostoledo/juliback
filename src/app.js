@@ -9,7 +9,7 @@ const morgan = require("morgan");
 const helmet = require("helmet");
 const mercadopago = require("mercadopago");
 const routes = require("./routes/index.js");
-const rateLimit = require('express-rate-limit');
+//const rateLimit = require('express-rate-limit');
 const xss = require("xss-clean");
 // const crypto = require('crypto');
 require("./db.js");
@@ -56,11 +56,11 @@ const whitelist = [
 //   next();
 // });
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // Límite por IP
-  message: "Demasiadas peticiones desde esta IP, intentá más tarde.",
-});
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutos
+//   max: 100, // Límite por IP
+//   message: "Demasiadas peticiones desde esta IP, intentá más tarde.",
+// });
 
 // Configuración de CORS
 const corsOptions = {
