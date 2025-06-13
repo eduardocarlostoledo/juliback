@@ -106,7 +106,7 @@ server.use(
   })
 );
 
-server.use(limiter);
+//server.use(limiter);
 server.use(xss());
 //esto es para que no exista colision entre helmet y el inicio de sesion de google que requiere permisos "especiales"
 server.use ( (req, res, next) => {
