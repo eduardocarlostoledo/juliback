@@ -33,7 +33,7 @@ const envOrigins = [BACK, FRONT]
   .map((origin) => origin.replace(/\/$/, ""));
 
 const whitelist = [
-  "https://july-marroquineria.netlify.app",  
+  "https://hallpa.netlify.app",  
   "https://modatotal.netlify.app",  
   "https://elgatonegropremium.netlify.app",
   "https://elgatonegropremium-back-production.up.railway.app",
