@@ -65,6 +65,19 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING,
         allowNull: true,
       },
+      payment_provider: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: "mercadopago",
+      },
+      payment_provider_reference: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      payment_provider_data: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
       processing_mode: {
         type: DataTypes.STRING,
         allowNull: true,
@@ -74,9 +87,13 @@ module.exports = (sequelize) => {
         allowNull: true,
       },
       estadoEnvio:{
-        type: DataTypes.ENUM('enviada', 'pendiente', 'cancelada'),
+        type: DataTypes.STRING,
         allowNull: true,
         defaultValue: 'pendiente'
+      },
+      shipping_provider: {
+        type: DataTypes.STRING,
+        allowNull: true,
       },
       trackSeguimiento: {
         type: DataTypes.STRING,
@@ -88,6 +105,23 @@ module.exports = (sequelize) => {
       },
       trackCarrierName: {
         type: DataTypes.STRING,
+        allowNull: true,
+      },
+      shipping_data: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      invoice_provider: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      invoice_status: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: "not_requested",
+      },
+      invoice_data: {
+        type: DataTypes.JSON,
         allowNull: true,
       },
       createdAt: {

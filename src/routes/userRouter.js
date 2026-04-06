@@ -1,4 +1,5 @@
 const { Router } = require("express");
+const { User } = require("../db");
 
 const {
   putUser,
@@ -9,6 +10,7 @@ const {
   deleteUser,
   postUserGoogle,
   loginGoogle,
+  googleAuth,
   findUser,
   recuperarPassword,
 } = require("../controllers/usersController.js");
@@ -25,6 +27,12 @@ userRouter.get('/verificalogin', verificaUsuario, (req, res) => {
       user: {
           id: user.id,
           name: user.name,
+          lastname: user.lastname,
+          image: user.image,
+          phonenumber: user.phonenumber,
+          country: user.country,
+          city: user.city,
+          address: user.address,
           email: user.email,
           admin: user.admin,
           status: user.status,
@@ -39,6 +47,7 @@ userRouter.post("/register", postUsers); // users/register
 
 //////////////////////////////// CREAR USUARIO ///////////////////////////////////////
 userRouter.post("/google", postUserGoogle); // users/google
+userRouter.post("/google-auth", googleAuth);
 
 //////////////////////////////// INICIAR SESSION  ///////////////////////////////////////
 userRouter.post("/login", loginUser);
@@ -52,19 +61,26 @@ userRouter.get("/logout", (req, res) => {
   });
 });
 
-//////////////////////////////// MODIFICAR USUARIO  ///////////////////////////////////////
-userRouter.put("/:id", async (req, res) => {
-  console.log("solicitado modificar usuario por id /:id", req.body, req.params);
+////////////////////
+userRouter.put("/:id", verificaToken, async (req, res) => {
   const { id } = req.params;
-  let image = false;
-  if (req.files) image = req.files.image;
+  const image = req.files?.image || null;
+
+  if (!req.user.admin && req.user.userId !== id) {
+    return res.status(403).json({ msg: "No autorizado para actualizar este usuario" });
+  }
+
   try {
-    const user = await putUser(req.body, image, id);
-    res.status(200).json("Usuario actualizado");
+    await putUser(req.body, image, id);
+    const updatedUser = await User.findByPk(id);
+
+    return res.status(200).json({ msg: "Usuario actualizado", user: updatedUser });
   } catch (error) {
-    res.status(400).json(error.message);
+    return res.status(400).json({ msg: error.message });
   }
 });
+
+
 
 ///////////////////////////// PERMITIR CAMBIO DE CONTRASEÑA Y ENVIO DE MAIL /////////////////////////////
 userRouter.post("/changePass", recuperarPassword);

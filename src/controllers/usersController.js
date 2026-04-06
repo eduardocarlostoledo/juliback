@@ -1,112 +1,157 @@
-
-const jwt = require('jsonwebtoken');
-const { User } = require('../db')
-const { encrypt, compare } = require('../helpers/bcrypt');
+const validator = require("validator");
+const jwt = require("jsonwebtoken");
+const { User } = require("../db");
+const { encrypt, compare } = require("../helpers/bcrypt");
 const { Op } = require("sequelize");
-const { uploadImage, deleteImage } = require('../utils/cloudinary')
-const fs = require('fs-extra');
-const enviarPass = require('../mail/changePass')
+const { uploadImage, deleteImage } = require("../utils/cloudinary");
+const fs = require("fs-extra");
+const enviarPass = require("../mail/changePass");
+
+const sanitizeField = (field) => {
+  if (typeof field !== "string") return field;
+  return validator.escape(validator.trim(field));
+};
+
+const buildAuthResponse = (user, provider = "credentials") => {
+  const token = jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      admin: user.admin,
+      status: user.status,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN }
+  );
+
+  return {
+    msg: "Login successful",
+    token,
+    provider,
+    user: {
+      token,
+      id: user.id,
+      name: user.name,
+      lastname: user.lastname,
+      image: user.image,
+      phonenumber: user.phonenumber,
+      country: user.country,
+      city: user.city,
+      address: user.address,
+      email: user.email,
+      admin: user.admin,
+      status: user.status,
+    },
+    success: true,
+  };
+};
+
+const normalizeGooglePayload = (payload = {}) => {
+  const {
+    email,
+    name,
+    given_name,
+    family_name,
+    lastname,
+    picture,
+    image,
+    email_verified,
+  } = payload;
+
+  return {
+    email: email ? validator.normalizeEmail(email) : null,
+    name: sanitizeField(given_name || name?.split(" ")?.[0] || name || "Usuario"),
+    lastname: sanitizeField(
+      family_name || lastname || name?.split(" ")?.slice(1).join(" ") || "Google"
+    ),
+    image: picture || image || null,
+    emailVerified: email_verified !== false,
+  };
+};
 
 const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ where: { email } });
+    const normalizedEmail = email ? validator.normalizeEmail(email) : null;
+    const user = await User.findOne({ where: { email: normalizedEmail } });
+
     if (!user) {
-      return res.json({ msg: 'User not found', success: false });
+      return res.status(404).json({ msg: "User not found", success: false });
     }
 
     const checkPassword = await compare(password, user.password);
     if (!checkPassword) {
-      return res.json({ msg: 'Invalid password', success: false });
+      return res.status(401).json({ msg: "Invalid password", success: false });
     }
 
-    // Generar token JWT
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-        admin: user.admin,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN } // Ejemplo: '1d' (1 día)
-    );
-
-    // Enviar el token junto con los datos del usuario
-    res.status(200).json( {
-      msg: 'Login successful',      
-      user: {
-        token,
-        id: user.id,
-        name: user.name,
-        lastname: user.lastname,
-        image: user.image,
-        phonenumber: user.phonenumber,
-        country: user.country,
-        city: user.city,
-        email: user.email,
-        admin: user.admin,
-        status: user.status,
-      },
-      success: true,
-    });
+    return res.status(200).json(buildAuthResponse(user));
   } catch (error) {
-    return res.json({ msg: `Error 404 - ${error.message}` });
+    return res.status(500).json({ msg: `Error 500 - ${error.message}` });
   }
 };
 
-const loginGoogle = async (req, res) => {
-  //console.log("login google", req.body)
+const googleAuth = async (req, res) => {
   try {
-    const { email } = req.body;
-    const user = await User.findOne({ where: { email } });
-    //console.log(user)
-    if (!user) {
-      return res.json({ msg: 'User not found', success: false });
+    const googleProfile = normalizeGooglePayload(req.body);
+
+    if (!googleProfile.email) {
+      return res.status(400).json({ msg: "Missing email", success: false });
     }
 
-    // Generar token JWT
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-        admin: user.admin,
-        status: user.status,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
+    if (!googleProfile.emailVerified) {
+      return res
+        .status(401)
+        .json({ msg: "Google email not verified", success: false });
+    }
 
-    // Enviar el token y los datos del usuario
-    res.status(200).json({
-      msg: 'Login successful',
-      token,
-      user: {
-        token,
-        id: user.id,
-        name: user.name,
-        lastname: user.lastname,
-        image: user.image,
-        phonenumber: user.phonenumber,
-        country: user.country,
-        city: user.city,
-        email: user.email,
-        admin: user.admin,
-        status: user.status,
-      },
-      success: true,
-    });
+    let user = await User.findOne({ where: { email: googleProfile.email } });
+
+    if (!user) {
+      user = await User.create({
+        name: googleProfile.name,
+        lastname: googleProfile.lastname,
+        email: googleProfile.email,
+        image: {
+          public_id: null,
+          secure_url: googleProfile.image,
+        },
+        password: "GOOGLE_AUTH_USER",
+      });
+    } else {
+      const updates = {};
+
+      if (!user.name && googleProfile.name) {
+        updates.name = googleProfile.name;
+      }
+
+      if (!user.lastname && googleProfile.lastname) {
+        updates.lastname = googleProfile.lastname;
+      }
+
+      if ((!user.image || !user.image.secure_url) && googleProfile.image) {
+        updates.image = {
+          public_id: null,
+          secure_url: googleProfile.image,
+        };
+      }
+
+      if (Object.keys(updates).length) {
+        await user.update(updates);
+        user = await User.findByPk(user.id);
+      }
+    }
+
+    return res.status(200).json(buildAuthResponse(user, "google"));
   } catch (error) {
-    return res.json({ msg: `Error 404 - ${error.message}` });
+    return res.status(500).json({ msg: `Error 500 - ${error.message}` });
   }
 };
 
-//esta ruta se usa para consultar si el usuario existe....
 const getUsers = async () => {
   try {
     const result = await User.findAll();
-  
+
     if (result) return result;
     throw new Error("Empy users database:");
   } catch (error) {
@@ -117,48 +162,54 @@ const getUsers = async () => {
 const getUserId = async (userId) => {
   try {
     const result = await User.findByPk(userId);
+    console.log(result, "entregando getuserid");
     if (result) return result;
     throw new Error("User not found with ID: " + userId);
   } catch (error) {
     throw new Error("Error retrieving User by ID: " + error.message);
   }
 };
+
 const putUser = async (user, image, id) => {
+  if (!user || Object.keys(user).length === 0) {
+    throw Error("No se recibio informacion del usuario");
+  }
+
+  user = JSON.parse(JSON.stringify(user));
+
   const {
-    name,
-    lastname,
-    email,
-    password,
-    phonenumber,
-    country,
-    city,
-    address,
-    admin,
-    status
+    name = null,
+    lastname = null,
+    email = null,
+    password = null,
+    phonenumber = null,
+    country = null,
+    city = null,
+    address = null,
+    admin = undefined,
+    status = undefined,
   } = user;
 
-  if (!user && !image) throw Error('User data missing');
-
   try {
-    const fieldsToUpdate = {
-      admin,
-      status,
-      name,
-      lastname,
-      email,
-      phonenumber,
-      country,
-      city,
-      address
-    };
+    const fieldsToUpdate = {};
 
-    // Si hay contraseña, hashearla y agregarla a los campos
-    if (password) {
-      const passwordHash = await encrypt(password);
-      fieldsToUpdate.password = passwordHash;
+    if (name) fieldsToUpdate.name = sanitizeField(name);
+    if (lastname) fieldsToUpdate.lastname = sanitizeField(lastname);
+    if (email && validator.isEmail(email)) {
+      fieldsToUpdate.email = validator.normalizeEmail(email);
+    }
+    if (phonenumber) fieldsToUpdate.phonenumber = sanitizeField(phonenumber);
+    if (country) fieldsToUpdate.country = sanitizeField(country);
+    if (city) fieldsToUpdate.city = sanitizeField(city);
+    if (address) fieldsToUpdate.address = sanitizeField(address);
+
+    if (typeof admin === "boolean") fieldsToUpdate.admin = admin;
+    if (typeof status === "boolean") fieldsToUpdate.status = status;
+
+    if (password && typeof password === "string" && password.length >= 8) {
+      fieldsToUpdate.password = await encrypt(password);
     }
 
-    // Si hay imagen, subir a Cloudinary y preparar campos
     if (image) {
       const userToUpdate = await User.findByPk(id);
       const result = await uploadImage(image.tempFilePath);
@@ -169,104 +220,95 @@ const putUser = async (user, image, id) => {
 
       fieldsToUpdate.image = {
         public_id: result.public_id,
-        secure_url: result.secure_url
+        secure_url: result.secure_url,
       };
 
       await fs.remove(image.tempFilePath);
     }
 
-    const changeUser = await User.update(fieldsToUpdate, { where: { id } });
-    return changeUser;
-
+    await User.update(fieldsToUpdate, { where: { id } });
+    return true;
   } catch (error) {
     throw Error(error.message);
   }
 };
 
+const postUserGoogle = googleAuth;
+const loginGoogle = googleAuth;
 
-const postUserGoogle = async (req, res) => {
-  console.log("post user google", req.body)
-  try {
-    const { name, lastname, email, image } = req.body;
-    if (!name || !lastname || !email) return res.json({ msg: 'Missing required fields', success: false });
-    
-    const userBD = await User.findOne({ where: { email: `${email}` } });
-    if (userBD) {
-    return res.json({ msg: 'The email already exists', success: false  });
-    }
-
-    const user = await User.create({
-      name: name,
-      lastname: lastname,
-      email: email,
-      image: { public_id: null, secure_url: image },
-      password: "XDRWQDFF11asedfa123"
-    });
-    return res.json({ msg: `User create succesfully`, success: true, user });    
-
-  } catch (error) {
-    return res.json({ msg: `Error 404 - ${error}` });
-  }
-}
-
-//registro de usuarios y verificacion de datos iniciales
 const postUsers = async (req, res) => {
-  const infoUser = {}
-  const regexName = /^([a-zA-Z ]+)$/i;
-  const regexPassword = /^(?=.*\d)(?=.*[A-Z])(?=.*[a-z])(?=.*[a-zA-Z!#$%&? "])[a-zA-Z0-9!#$%&?]{8,20}$/
-  const regexEmail = /^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/g
+  const regexName = /^[a-zA-Z\s]+$/;
+  const regexPassword =
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|:;"'<>,.?/~`]).{8,20}$/;
+  const regexEmail = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
 
   try {
     const { name, lastname, email, password } = req.body;
 
-    if (!name || !lastname || !password || !email) return res.json({ msg: 'Missing required fields' });
-
-
-    if (email && email.length > 0 && email != "") {
-      if (regexEmail.test(email)) {
-        const userBD = await User.findOne({ where: { email: `${email}` } });
-        if (userBD) {
-          return res.json({ msg: 'The email already exists' });
-        } else {
-          infoUser.email = `${email}`
-        }
-      }
+    if (!name || !lastname || !password || !email) {
+      return res.status(400).json({ msg: "Missing required fields" });
     }
 
-    if (name && name.length > 0 && name != "") {
-      if (regexName.test(name)) {
-        infoUser.name = `${name}`
-      } else {
-        return res.json({ msg: 'The name is invalid' });
-      }
-    }
+    const infoUser = {};
 
-    if (lastname && lastname.length > 0 && lastname != "") {
-      if (regexName.test(lastname)) {
-        infoUser.lastname = `${lastname}`
-      } else {
-        return res.json({ msg: 'The lastname is invalid' });
-      }
+    if (!regexEmail.test(email)) {
+      return res.status(400).json({ msg: "Invalid email format" });
     }
-
-    if (password && password.length > 0 && password != "") {
-      if (regexPassword.test(password)) {
-        const passwordHash = await encrypt(password);
-        infoUser.password = `${passwordHash}`
-      } else {
-        return res.json({ msg: 'The password is invalid' });
-      }
+    const normalizedEmail = validator.normalizeEmail(email);
+    const userBD = await User.findOne({ where: { email: normalizedEmail } });
+    if (userBD) {
+      return res.status(409).json({ msg: "The email already exists" });
     }
+    infoUser.email = normalizedEmail;
 
-    await User.create({
-      name: name,
-      lastname: lastname,
-      password: infoUser.password,
-      email: email,
+    if (!regexName.test(name)) {
+      return res
+        .status(400)
+        .json({ msg: "The name is invalid (only letters and spaces allowed)" });
+    }
+    if (name.length < 2 || name.length > 15) {
+      return res
+        .status(400)
+        .json({ msg: "Name must be between 2 and 15 characters" });
+    }
+    infoUser.name = name;
+
+    if (!regexName.test(lastname)) {
+      return res.status(400).json({
+        msg: "The lastname is invalid (only letters and spaces allowed)",
+      });
+    }
+    if (lastname.length < 2 || lastname.length > 15) {
+      return res
+        .status(400)
+        .json({ msg: "Lastname must be between 2 and 15 characters" });
+    }
+    infoUser.lastname = lastname;
+
+    if (!regexPassword.test(password)) {
+      return res.status(400).json({
+        msg: "Password must be between 8-20 characters and include at least one uppercase letter, one lowercase letter, one number, and one symbol.",
+      });
+    }
+    const passwordHash = await encrypt(password);
+    infoUser.password = passwordHash;
+
+    const user = await User.create(infoUser);
+    return res.status(201).json({
+      msg: "User created successfully",
+      user: {
+        id: user.id,
+        name: user.name,
+        lastname: user.lastname,
+        email: user.email,
+      },
+      success: true,
     });
-    return res.json({ msg: `User create succesfully` });
   } catch (error) {
-    return res.json({ msg: `Error 404 - ${error}` });
+    console.error("Error creating user:", error);
+    return res
+      .status(500)
+      .json({ msg: `Internal server error: ${error.message}` });
   }
 };
 
@@ -274,63 +316,71 @@ const deleteUser = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const deletedUser = await await User.destroy({
+    const deletedUser = await User.destroy({
       where: {
-        id: `${id}`
-      }
+        id: `${id}`,
+      },
     });
-    if (!deletedUser) return res.json({ msg: 'Username does not exist' });
-    return res.json({ msg: 'User Deleted' });
+    if (!deletedUser) return res.json({ msg: "Username does not exist" });
+    return res.json({ msg: "User Deleted" });
   } catch (error) {
     return res.json({ msg: `Error 404 - ${error}` });
   }
 };
 
-//Busco el User por query 
 const findUser = async (name) => {
-
   const results = await User.findAll({
     where: {
       name: { [Op.iLike]: `%${name}%` },
-    }
+    },
   });
-  return results
-}
+  return results;
+};
 
-//recuperar contraseña
 const recuperarPassword = async (req, res) => {
   const { email } = req.body;
 
   try {
-    // Verificar si el email existe en la base de datos
     const user = await User.findOne({ where: { email } });
 
     if (!user) {
-      return res.status(404).json({ msg: 'Usuario no encontrado', success: false });
+      return res
+        .status(404)
+        .json({ msg: "Usuario no encontrado", success: false });
     }
 
-    // Verificar si el usuario está activo
     if (!user.status) {
-      return res.status(403).json({ msg: 'El usuario está baneado', success: false });
+      return res
+        .status(403)
+        .json({ msg: "El usuario esta baneado", success: false });
     }
 
-    // Generar un código de recuperación de 6 dígitos
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Enviar el correo con el código de recuperación
     await enviarPass(email, code);
 
-    // Responder con éxito y el código generado
-    res.status(200).json({ msg: 'Correo enviado con éxito', pass: code, success: true });
-
+    res
+      .status(200)
+      .json({ msg: "Correo enviado con exito", pass: code, success: true });
   } catch (error) {
-    // Manejar errores y responder con un mensaje adecuado
-    console.error('Error en el cambio de contraseña:', error);
-    res.status(500).json({ msg: 'Error en el servidor. No se pudo enviar el correo.', success: false });
+    console.error("Error en el cambio de contraseña:", error);
+    res.status(500).json({
+      msg: "Error en el servidor. No se pudo enviar el correo.",
+      success: false,
+    });
   }
-
-}
+};
 
 module.exports = {
-  putUser, getUsers, getUserId, loginUser, postUsers, deleteUser, postUserGoogle, loginGoogle, findUser, recuperarPassword
-}
+  putUser,
+  getUsers,
+  getUserId,
+  loginUser,
+  postUsers,
+  deleteUser,
+  postUserGoogle,
+  loginGoogle,
+  googleAuth,
+  findUser,
+  recuperarPassword,
+};

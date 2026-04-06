@@ -19,6 +19,11 @@ module.exports = (sequelize) => {
         public_id: DataTypes.STRING,
         secure_url: DataTypes.STRING,
       },
+      images: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: [],
+      },
       price: {
         type: DataTypes.DOUBLE,
         allowNull: false,
@@ -36,6 +41,16 @@ module.exports = (sequelize) => {
       },
       info_adicional: {
         type: DataTypes.STRING,
+      },
+      colors: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        allowNull: false,
+        defaultValue: [],
+      },
+      sizes: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        allowNull: false,
+        defaultValue: [],
       },
       calification: {
         type: DataTypes.DOUBLE,

@@ -1,8 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const passport = require("passport");
-const session = require("express-session");
-const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const cors = require("cors");
 const fileUpload = require("express-fileupload");
 const morgan = require("morgan");
@@ -16,6 +13,7 @@ require("./db.js");
 
 const server = express();
 server.name = "API";
+const { BACK, FRONT } = process.env;
 
 // Configuración de MercadoPago
 const ACCESS_TOKEN_MERCADOPAGO = process.env.ACCESS_TOKEN_MERCADOPAGO;
@@ -30,11 +28,13 @@ if (ACCESS_TOKEN_MERCADOPAGO) {
 }
 
 // Variables para URLs comunes
+const envOrigins = [BACK, FRONT]
+  .filter(Boolean)
+  .map((origin) => origin.replace(/\/$/, ""));
+
 const whitelist = [
   "https://july-marroquineria.netlify.app",  
   "https://modatotal.netlify.app",  
-  "http://localhost:3001",
-  "http://localhost:5173",
   "https://elgatonegropremium.netlify.app",
   "https://elgatonegropremium-back-production.up.railway.app",
   "https://api.mercadopago.com",
@@ -48,6 +48,7 @@ const whitelist = [
   "https://res.cloudinary.com",
   "https://fonts.gstatic.com",
   "https://www.mercadopago.com",
+  ...envOrigins,
 ];
 
 // server.use((req, res, next) => {
@@ -112,7 +113,7 @@ server.use(xss());
 server.use ( (req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
-    "script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com https://api.mercadopago.com https://sdk.mercadopago.com https://accounts.google.com/o/oauth2/v2/auth/oauthchooseaccount https://elgatonegropremium-back-production.up.railway.app/users/auth/google http://localhost:3001/users/auth/google https://events.mercadopago.com https://api.mercadolibre.com/tracks https://events.mercadopago.com/v2/traffic-light"
+    "script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com https://api.mercadopago.com https://sdk.mercadopago.com https://accounts.google.com/o/oauth2/v2/auth/oauthchooseaccount https://elgatonegropremium-back-production.up.railway.app/users/auth/google http://localhost:6001/users/auth/google https://events.mercadopago.com https://api.mercadolibre.com/tracks https://events.mercadopago.com/v2/traffic-light"
   );
 next();
 })
@@ -131,9 +132,10 @@ server.use(helmet.hidePoweredBy());
 
 // Otros middlewares
 server.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+server.use(fileUpload({ useTempFiles: true, tempFileDir: "./uploads" }));
 server.use(express.json());
 server.use(express.urlencoded({ extended: false }));
-server.use(fileUpload({ useTempFiles: true, tempFileDir: "./uploads" }));
+
 
 // Middleware para agregar un ID único a las solicitudes
 server.use((req, res, next) => {
@@ -149,33 +151,6 @@ server.use((req, res, next) => {
   next();
 });
 
-// Sesiones y autenticación con Passport
-server.use(
-  session({
-    secret: process.env.JWT_SECRET,
-    resave: false,
-    saveUninitialized: true,
-    cookie: { sameSite: "Lax", secure: process.env.NODE_ENV === "production" }
-    // cookie: { sameSite: "None", secure: true }, //solo para https
-  })
-);
-server.use(passport.initialize());
-server.use(passport.session());
-
-passport.use(
-  new GoogleStrategy(
-    {
-      clientID: process.env.CLIENT_ID_LOGIN,
-      clientSecret: process.env.CLIENT_SECRET,
-      callbackURL: "/auth/callback",
-    },
-    (accessToken, refreshToken, profile, done) => done(null, profile)
-  )
-);
-
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((user, done) => done(null, user));
-
 // Rutas
 server.use("/", routes);
 
@@ -185,5 +160,6 @@ server.use((err, req, res, next) => {
   console.error(err);
   res.status(status).send(err.message || "Error interno del servidor");
 });
+
 
 module.exports = server;

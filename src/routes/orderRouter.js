@@ -1,4 +1,3 @@
-const { Order } = require("../db");
 const { Router } = require("express");
 const orderRouter = Router();
 const {
@@ -10,53 +9,34 @@ const {
 } = require("../controllers/orderControllers");
 const { verificaToken } = require("../helpers/verificaToken");
 const { verifyAdmin } = require("../helpers/verifyAdmin");
+const {
+  ensureOrderAccess,
+  getOrderByIdOrThrow,
+} = require("../services/orderService");
 
-
-orderRouter.patch("/:orderId", async (req, res) => {
+orderRouter.patch("/:orderId", verificaToken, verifyAdmin, async (req, res) => {
   const { orderId } = req.params;
-  const { status, estadoEnvio, payment_type, buyer_address, buyer_phone, trackSeguimiento, trackUrl, trackCarrierName } = req.body;
 
-  console.log("orderId", orderId, status, estadoEnvio, payment_type, buyer_address, buyer_phone, trackSeguimiento, trackUrl, trackCarrierName);
-
-  // Validar que el cuerpo de la petición no esté vacío
   if (!Object.keys(req.body).length) {
-    return res.status(400).json({ message: "Los datos de actualización son obligatorios." });
+    return res
+      .status(400)
+      .json({ message: "Los datos de actualizacion son obligatorios." });
   }
 
   try {
-    const updatedOrder = await updateOrder(orderId, status, estadoEnvio, payment_type, buyer_address, buyer_phone, trackSeguimiento, trackUrl, trackCarrierName);
+    const updatedOrder = await updateOrder(orderId, req.body);
     return res.json(updatedOrder);
   } catch (error) {
-    return res.status(500).json({ message: "Error al actualizar la orden", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Error al actualizar la orden", error: error.message });
   }
 });
 
-
-
-
-// orderRouter.post('/', async (req,res) => {
-//     try {
-//         console.log("REQ.BODY POST CART", req.body)
-//         const newOrder=await postOrder(req.body)
-//         res.status(200).json(newOrder)
-//     } catch (error) {
-//         res.status(400).json(error.message)
-//     }
-// })
-
-/* Este post crea los orders por Insomia, después que se crean algunos, 
-    comenten este post y descomenten el de arriba que funciona con payRouter*/
-
 orderRouter.post("/", async (req, res) => {
   try {
-    console.log("REQ.BODY POST CART", req.body);
-    const { cartUserId, paymentId, statusId, merchantOrderId } = req.body;
-    const newOrder = await postOrder(
-      cartUserId,
-      paymentId,
-      statusId,
-      merchantOrderId
-    );
+    console.log("REQ.BODY POST ORDER", req.body);
+    const newOrder = await postOrder(req.body);
     res.status(200).json(newOrder);
   } catch (error) {
     res.status(400).json(error.message);
@@ -64,38 +44,63 @@ orderRouter.post("/", async (req, res) => {
 });
 
 orderRouter.get("/", verificaToken, verifyAdmin, async (req, res) => {
-  console.log("solicitando ruta /getorder");
   try {
     const response = await getOrders();
-
-    res.status(201).json(response);
+    res.status(200).json(response);
   } catch (error) {
     res.status(400).json("Error Handler Get Order");
   }
 });
 
-//se solicitan todas las ordenes del cliente
-orderRouter.get("/getorderclient/:userId", async (req, res) => {
-  console.log("1 getorderclient /getorderclient/:userId", req.params.userId);
+orderRouter.get("/me", verificaToken, async (req, res) => {
+  try {
+    const response = await getOrdersByUser(req.user.userId);
+    res.status(200).json(response);
+  } catch (error) {
+    res.status(400).json("Error Handler Get Order");
+  }
+});
+
+orderRouter.get("/getorderclient/:userId", verificaToken, async (req, res) => {
   const { userId } = req.params;
+
   try {
+    if (!req.user.admin && req.user.userId !== userId) {
+      return res
+        .status(403)
+        .json({ message: "No autorizado para ver estas ordenes." });
+    }
+
     const response = await getOrdersByUser(userId);
-    res.status(201).json(response);
+    res.status(200).json(response);
   } catch (error) {
     res.status(400).json("Error Handler Get Order");
   }
 });
 
-//se solicitan todas las ordenes del cliente
-orderRouter.get("/getorderid/:id", async (req, res) => {
-  console.log("1 getorderid ", req.params.id);
+orderRouter.get("/getorderid/:id", verificaToken, async (req, res) => {
   const { id } = req.params;
-  try {
-    const response = await getOrderById(id);
 
-    res.status(201).json(response);
+  try {
+    const order = await getOrderByIdOrThrow(id);
+    ensureOrderAccess(order, req.user);
+    const response = await getOrderById(id);
+    res.status(200).json(response);
   } catch (error) {
-    res.status(400).json("Error Handler Get Order");
+    res.status(error.status || 400).json("Error Handler Get Order");
+  }
+});
+
+orderRouter.get("/:id", verificaToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const order = await getOrderByIdOrThrow(id);
+    ensureOrderAccess(order, req.user);
+    const response = await getOrderById(id);
+    res.status(200).json(response);
+  } catch (error) {
+    res.status(error.status || 400).json("Error Handler Get Order");
   }
 });
 

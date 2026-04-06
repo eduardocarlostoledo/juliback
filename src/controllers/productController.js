@@ -1,13 +1,123 @@
-const { Product, User, Type, Brand } = require("../db");
-const {Op} = require('sequelize')
-const {uploadImage, deleteImage}=require('../utils/cloudinary')
-const fs = require('fs-extra');
+const { Product, Type, Brand } = require("../db");
+const { Op, fn, col, where } = require("sequelize");
+const { uploadImages, deleteImage } = require("../utils/cloudinary");
+const fs = require("fs-extra");
+
+const normalizeArrayField = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))];
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return [...new Set(parsed.map((item) => String(item).trim()).filter(Boolean))];
+      }
+    } catch (error) {
+      // Si no es JSON valido seguimos con parsing plano.
+    }
+
+    return [
+      ...new Set(
+        trimmed
+          .split(/,|\n|\|/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+      ),
+    ];
+  }
+
+  return [];
+};
+
+const normalizeStoredGallery = (product) => {
+  const images = Array.isArray(product.images) ? product.images : [];
+  const legacyImage = product.image ? [product.image] : [];
+  const gallery = images.length ? images : legacyImage;
+
+  return gallery.filter(Boolean);
+};
+
+const mapProductResponse = (product, includeReviews = false) => {
+  const gallery = normalizeStoredGallery(product);
+  const primaryImage = gallery[0] || null;
+
+  return {
+    id: product.id,
+    name: product.name,
+    image: primaryImage?.secure_url || null,
+    images: gallery.map((image) => image?.secure_url).filter(Boolean),
+    imageGallery: gallery,
+    price: product.price,
+    description: product.description,
+    type: product.type?.name,
+    brand: product.brand?.name,
+    info_adicional: product.info_adicional,
+    colors: Array.isArray(product.colors) ? product.colors : [],
+    sizes: Array.isArray(product.sizes) ? product.sizes : [],
+    stock: product.stock,
+    status: product.status,
+    ...(includeReviews
+      ? {
+          reviews: product.reviews,
+          calification: product.calification,
+        }
+      : {}),
+  };
+};
+
+const normalizeFileInput = (fileInput) => {
+  if (!fileInput) {
+    return [];
+  }
+
+  return Array.isArray(fileInput) ? fileInput : [fileInput];
+};
+
+const cleanupTempFiles = async (files = []) => {
+  await Promise.all(
+    files
+      .filter((file) => file?.tempFilePath)
+      .map((file) => fs.remove(file.tempFilePath))
+  );
+};
+
+const uploadProductGallery = async (files = []) => {
+  if (!files.length) {
+    return [];
+  }
+
+  const uploads = await uploadImages(files.map((file) => file.tempFilePath));
+
+  return uploads.map((result) => ({
+    public_id: result.public_id,
+    secure_url: result.secure_url,
+  }));
+};
+
+const deleteProductGallery = async (product) => {
+  const gallery = normalizeStoredGallery(product);
+  const publicIds = [...new Set(gallery.map((image) => image?.public_id).filter(Boolean))];
+
+  await Promise.all(publicIds.map((publicId) => deleteImage(publicId)));
+};
 
 const postTypeProductForAdmin = async (name) => {
   try {
     const [typeProduct] = await Type.findOrCreate({
       where: { name },
-      defaults: { name }
+      defaults: { name },
     });
     return typeProduct;
   } catch (error) {
@@ -19,7 +129,7 @@ const postBrandProductForAdmin = async (name) => {
   try {
     const [brandProduct] = await Brand.findOrCreate({
       where: { name },
-      defaults: { name }
+      defaults: { name },
     });
     return brandProduct;
   } catch (error) {
@@ -27,54 +137,36 @@ const postBrandProductForAdmin = async (name) => {
   }
 };
 
-// Obtiene los tipos de productos de la BDD
-const getTypeProducts = async() => {
-  try {    
-    const products = await Type.findAll();  
-    return products;
+const getTypeProducts = async () => {
+  try {
+    return await Type.findAll();
   } catch (error) {
     throw new Error("Error retrieving product by Type: " + error.message);
   }
-}
+};
 
-// Obtiene las marcas de la BDD
-
-const getBrandProducts = async() => {
+const getBrandProducts = async () => {
   try {
-    const products = await Brand.findAll();
-    return products;
+    return await Brand.findAll();
   } catch (error) {
     throw new Error("Error retrieving products by brand: " + error.message);
   }
-}
-
-// Obtiene los productos si contienen la palabra que recibe por parametro (Para la busqueda)
+};
 
 const getProductsByName = async (productName) => {
   try {
     const products = await Product.findAll({
-      include: [Type,Brand],
+      include: [Type, Brand],
       where: {
         name: {
           [Op.iLike]: `%${productName}%`,
         },
       },
     });
-    const filterBans = products.filter( product => product.status === true)
-    const result = filterBans.map((p) => {
-      return {
-        id: p.id,
-        name: p.name,
-        image:p.image.secure_url,
-        price:p.price,
-        description: p.description,
-        type: p.type.name,
-        brand: p.brand.name,
-        stock: p.stock,
-        status:p.status
-      }
-    })
-    return result;
+
+    return products
+      .filter((product) => product.status === true)
+      .map((product) => mapProductResponse(product));
   } catch (error) {
     throw new Error("Error retrieving product by Name: " + error.message);
   }
@@ -83,284 +175,260 @@ const getProductsByName = async (productName) => {
 const getProductsByNameForAdmin = async (productName) => {
   try {
     const products = await Product.findAll({
-      include: [Type,Brand],
+      include: [Type, Brand],
       where: {
         name: {
           [Op.iLike]: `%${productName}%`,
         },
       },
     });
-    const result = products.map((p) => {
-      return {
-        id: p.id,
-        name: p.name,
-        image:p.image.secure_url,
-        price:p.price,
-        description: p.description,
-        type: p.type.name,
-        brand: p.brand.name,
-        stock: p.stock,
-        status:p.status
-      }
-    })
-    return result;
+
+    return products.map((product) => mapProductResponse(product));
   } catch (error) {
     throw new Error("Error retrieving product by Name: " + error.message);
   }
 };
 
-
-//Obtiene todos los productos de la BDD
-
 const getProducts = async () => {
-    try {
-      const allProducts = await Product.findAll({include: [Type,Brand]});
-      const filterBans = allProducts.filter( product => product.status === true)
-      const result = filterBans.map((p) => {
-        return {
-          id: p.id,
-          name: p.name,
-          image:p.image.secure_url,
-          price:p.price,
-          description: p.description,
-          type: p.type.name,
-          brand: p.brand.name,
-          info_adicional: p.info_adicional,
-          stock: p.stock,
-          status:p.status
-        }
-      })
-      return result;
-    } catch (error) {
-      throw new Error("Error retrieving products: " + error.message);
-    }
-  };
+  try {
+    const allProducts = await Product.findAll({ include: [Type, Brand] });
+
+    return allProducts
+      .filter((product) => product.status === true)
+      .map((product) => mapProductResponse(product));
+  } catch (error) {
+    throw new Error("Error retrieving products: " + error.message);
+  }
+};
 
 const getProductsForAdmin = async () => {
-    try {
-      const allProducts = await Product.findAll({include: [Type,Brand]});
-      const result = allProducts.map((p) => {
-        return {
-          id: p.id,
-          name: p.name,
-          image:p.image.secure_url,
-          price:p.price,
-          description: p.description,
-          type: p.type.name,
-          brand: p.brand.name,
-          info_adicional: p.info_adicional,
-          stock: p.stock,
-          status:p.status
-        }
-      })
-      return result;
-    } catch (error) {
-      throw new Error("Error retrieving products: " + error.message);
-    }
-  };
-  
-
-// Obtiene los productos cuando tienen el nombre exactamente igual al que reciben por parametro (Sirve para la ruta Detail en el Front)
-
-const getProductName = async (product) => {
   try {
-    const products = await Product.findAll({include: [Type,Brand],where:{name:product}});
-    const filterBans = products.filter( product => product.status === true)
-    const result = filterBans.map((p) => {
-      return {
-        id: p.id,
-        name: p.name,
-        image:p.image.secure_url,
-        price:p.price,
-        description: p.description,
-        type: p.type.name,
-        brand: p.brand.name,        
-        stock:p.stock,
-        reviews:p.reviews,
-        calification:p.calification,
-        info_adicional:p.info_adicional,
-        status:p.status
-      }
-    })
-    if (result) return result;
-    throw new Error("Product not found with exact name: " + product);
+    const allProducts = await Product.findAll({ include: [Type, Brand] });
+    return allProducts.map((product) => mapProductResponse(product));
+  } catch (error) {
+    throw new Error("Error retrieving products: " + error.message);
+  }
+};
+
+const getProductName = async (productName) => {
+  try {
+    const normalizedProductName = String(productName || "").trim();
+    const products = await Product.findAll({
+      include: [Type, Brand],
+      where: where(fn("trim", col("Product.name")), {
+        [Op.iLike]: normalizedProductName,
+      }),
+    });
+
+    return products
+      .filter((product) => product.status === true)
+      .map((product) => mapProductResponse(product, true));
   } catch (error) {
     throw new Error("Error retrieving product by name: " + error.message);
   }
 };
 
+const postProduct = async (product, imageInput) => {
+  const {
+    name,
+    price,
+    type,
+    brand,
+    description,
+    info_adicional,
+    colors,
+    sizes,
+    stock,
+  } = product;
+  const imageFiles = normalizeFileInput(imageInput);
 
-
-// Crea un producto en la BDD, esta accion sirve para testear. (Unicamente va a ser ejecutada por un administrador, no el usuario)
-// const postProduct = async (product, image) => {
-//   const { name, price, type, brand, description, info_adicional, stock } = product;
-//   console.log(product.stock, "POST")
-//   if (!name || !price || !type || !brand || !description || !image || !stock) {
-//     throw new Error("Mandatory data missing");
-//   }
-
-//   try {
-//     const [typeData, createdType] = await Type.findOrCreate({
-//       where: { name: type },
-//       defaults: { name: type }
-//     });
-//     console.log(typeData.name, "POST")
-
-//     const [brandData, createdBrand] = await Brand.findOrCreate({
-//       where: { name: brand },
-//       defaults: { name: brand }
-//     });
-//     console.log(brandData.name, "POST")
-
-//     const result = await uploadImage(image.tempFilePath);
-//     console.log(result, "POSTIMAGE")
-
-//     const newProduct = await Product.create({
-//       name,
-//       price,
-//       description,
-//       image: { public_id: result.public_id, secure_url: result.secure_url },
-//       typeId: typeData.id,
-//       brandId: brandData.id,
-//       info_adicional,
-//       stock,
-//     });
-//     console.log(newProduct, "POSTOK")
-
-//     await fs.remove(image.tempFilePath);
-//     console.log(product.stock, newProduct, "POSTOK")
-
-//     return newProduct;
-//   } catch (error) {
-//     console.error(error);
-//     throw new Error(error.message);
-//   }
-// };
-
-const postProduct = async (product, image) => {
-  //console.log("POST PRODUCT", product, image)
-  const { name, price, type, brand, description, info_adicional, stock } = product;
-  if (!name || !price || !type || !brand || !description || !image || !stock) {
+  if (
+    !name ||
+    !price ||
+    !type ||
+    !brand ||
+    !description ||
+    !imageFiles.length ||
+    !stock
+  ) {
     throw new Error("Mandatory data missing");
   }
 
   try {
-    const [typeData] = await Type.findOrCreate({ where: { name: type }, defaults: { name: type } });
-    const [brandData] = await Brand.findOrCreate({ where: { name: brand }, defaults: { name: brand } });
+    const [typeData] = await Type.findOrCreate({
+      where: { name: type },
+      defaults: { name: type },
+    });
+    const [brandData] = await Brand.findOrCreate({
+      where: { name: brand },
+      defaults: { name: brand },
+    });
 
-    const result = await uploadImage(image.tempFilePath);
+    const uploadedGallery = await uploadProductGallery(imageFiles);
+
     const newProduct = await Product.create({
       name,
       price,
       description,
-      image: { public_id: result.public_id, secure_url: result.secure_url },
+      image: uploadedGallery[0] || null,
+      images: uploadedGallery,
       typeId: typeData.id,
       brandId: brandData.id,
       info_adicional,
+      colors: normalizeArrayField(colors),
+      sizes: normalizeArrayField(sizes),
       stock,
     });
 
-    await fs.remove(image.tempFilePath);
-    return newProduct;
+    await cleanupTempFiles(imageFiles);
+
+    const createdProduct = await Product.findByPk(newProduct.id, {
+      include: [Type, Brand],
+    });
+
+    return mapProductResponse(createdProduct);
   } catch (error) {
-    console.error(error);
+    await cleanupTempFiles(imageFiles);
     throw new Error("Error creating product: " + error.message);
   }
 };
 
+const putProduct = async (id, product, imageInput) => {
+  const productToUpdate = await Product.findByPk(id, { include: [Type, Brand] });
+  if (!productToUpdate) throw Error("El producto que desea actualizar no existe");
+  if (!product && !imageInput) throw Error("No se envio ningun dato para actualizar");
 
-const putProduct = async (id,product, image) => {
-  //console.log("PUT PRODUCT controller", id, product, image)
-  const { name, price, type, brand, description,info_adicional, stock } = product;
-  const productToUpdate=await Product.findByPk(id) 
-  if(!productToUpdate) throw Error('El producto que desea actualizar no existe')
-  if (!product && !image) throw Error('No se envió ningun dato para actualizar')
+  const {
+    name,
+    price,
+    type,
+    brand,
+    description,
+    info_adicional,
+    colors,
+    sizes,
+    stock,
+  } = product;
+  const imageFiles = normalizeFileInput(imageInput);
 
-  if(image){
-    //invoco la funcion para subir la imagen a cloudinary
-    const result=await uploadImage(image.tempFilePath)
-    deleteImage(productToUpdate.image.public_id)
-    await Product.update({image:{public_id:result.public_id,secure_url:result.secure_url}}, { where: { id } })
-    
-    //borro la imagen de la carpeta uploads para que solo quede guardada en cloudinary
-    await fs.remove(image.tempFilePath)
+  try {
+    if (imageFiles.length) {
+      const uploadedGallery = await uploadProductGallery(imageFiles);
+      await deleteProductGallery(productToUpdate);
+
+      await Product.update(
+        {
+          image: uploadedGallery[0] || null,
+          images: uploadedGallery,
+        },
+        { where: { id } }
+      );
+
+      await cleanupTempFiles(imageFiles);
+    }
+
+    if (type) {
+      const [newType] = await Type.findOrCreate({ where: { name: type } });
+      await Product.update({ typeId: newType.id }, { where: { id } });
+    }
+
+    if (brand) {
+      const [newBrand] = await Brand.findOrCreate({ where: { name: brand } });
+      await Product.update({ brandId: newBrand.id }, { where: { id } });
+    }
+
+    const fieldsToUpdate = {};
+    if (name !== undefined) fieldsToUpdate.name = name;
+    if (price !== undefined) fieldsToUpdate.price = price;
+    if (description !== undefined) fieldsToUpdate.description = description;
+    if (info_adicional !== undefined)
+      fieldsToUpdate.info_adicional = info_adicional;
+    if (colors !== undefined) fieldsToUpdate.colors = normalizeArrayField(colors);
+    if (sizes !== undefined) fieldsToUpdate.sizes = normalizeArrayField(sizes);
+    if (stock !== undefined) fieldsToUpdate.stock = stock;
+
+    if (Object.keys(fieldsToUpdate).length) {
+      await Product.update(fieldsToUpdate, { where: { id } });
+    }
+
+    const updatedProduct = await Product.findByPk(id, { include: [Type, Brand] });
+    return mapProductResponse(updatedProduct, true);
+  } catch (error) {
+    await cleanupTempFiles(imageFiles);
+    throw new Error(error.message);
   }
-  if(type){
-    const [newType,created]=await Type.findOrCreate({where:{name:type}})
-    const typeId = created ? newType.id : newType.dataValues.id;
-    await Product.update({typeId}, { where: { id } })
-  }
-
-  if(brand){
-    const [newBrand, created]=await Brand.findOrCreate({where:{name:brand}})
-    const brandId= created ? newBrand.id : newBrand.dataValues.id;
-    await Product.update({brandId}, { where: { id } })
-  }
-
-  await Product.update({name, price, description,info_adicional, stock }, { where: { id } })
-
-  return await Product.findByPk(id);
-}
+};
 
 const banOrUnban = async (id) => {
-  const {status} = await Product.findByPk(id)
-
-  await Product.update({status:!status}, { where: { id } })
-
+  const { status } = await Product.findByPk(id);
+  await Product.update({ status: !status }, { where: { id } });
   return await Product.findByPk(id);
-}
+};
 
 const BuildSearch = async (socket) => {
   try {
     const products = await Product.findAll({
-      include: [Type,Brand],
+      include: [Type, Brand],
       where: {
-        "info_adicional": socket,
+        info_adicional: socket,
       },
     });
-    const filterBans = products.filter( product => product.status === true)
-    const result = filterBans.map((p) => {
-      return {
-        id: p.id,
-        name: p.name,
-        image:p.image.secure_url,
-        price:p.price,
-        description: p.description,
-        info_adicional: p.info_adicional,
-        type: p.type.name,
-        brand: p.brand.name,
-        stock: p.stock,
-        status:p.status
-      }
-    })
-    return result;
+
+    return products
+      .filter((product) => product.status === true)
+      .map((product) => mapProductResponse(product));
   } catch (error) {
     throw new Error("Error retrieving products by brand: " + error.message);
   }
 };
 
-const putReview = async (productId,review) => {
-  //console.log("PUT REVIEW", productId, review)
-  //busco el producto con el id recibido por parametro
-  let product = await Product.findByPk(productId);
+const putReview = async (productId, review) => {
+  const product = await Product.findByPk(productId);
 
-  //si el producto no existe lanzo un error
-  if(!product) throw Error("The product not exists");
+  if (!product) throw Error("The product not exists");
 
-  //obtengo la cantidad total de reviews
-  const totalReviews=product.reviews.length + 1;
+  const totalReviews = product.reviews.length + 1;
+  const totalCalifications =
+    product.reviews.reduce((acc, currentReview) => acc + currentReview.calification, 0) +
+    review.calification;
 
-  //obtengo la suma total de calificaciones
-  const totalCalifications=product.reviews.reduce((acc, review) => acc + review.calification, 0) + review.calification
-
-  //actualizo el producto
   await product.update({
     reviews: [...product.reviews, review],
     calification: (totalCalifications / totalReviews).toFixed(1),
   });
 
   return "The review was added";
-}
+};
+
+const deleteProductImageByIndex = async (productId, imageIndex) => {
+  const product = await Product.findByPk(productId, { include: [Type, Brand] });
+  if (!product) throw Error("El producto no existe");
+
+  const gallery = normalizeStoredGallery(product);
+  const index = Number(imageIndex);
+
+  if (index < 0 || index >= gallery.length) {
+    throw Error("Índice de imagen inválido");
+  }
+
+  const imageToDelete = gallery[index];
+  if (imageToDelete?.public_id) {
+    await deleteImage(imageToDelete.public_id);
+  }
+
+  const updatedGallery = gallery.filter((_, i) => i !== index);
+
+  await Product.update(
+    {
+      image: updatedGallery[0] || null,
+      images: updatedGallery,
+    },
+    { where: { id: productId } }
+  );
+
+  const updatedProduct = await Product.findByPk(productId, { include: [Type, Brand] });
+  return mapProductResponse(updatedProduct, true);
+};
 
 module.exports = {
   postProduct,
@@ -376,5 +444,6 @@ module.exports = {
   getProductsForAdmin,
   getProductsByNameForAdmin,
   postBrandProductForAdmin,
-  postTypeProductForAdmin
+  postTypeProductForAdmin,
+  deleteProductImageByIndex,
 };

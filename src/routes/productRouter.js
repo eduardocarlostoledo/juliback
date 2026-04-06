@@ -14,7 +14,8 @@ const {
   banOrUnban,
   getProductsForAdmin,
   getProductsByNameForAdmin,  postBrandProductForAdmin,
-  postTypeProductForAdmin
+  postTypeProductForAdmin,
+  deleteProductImageByIndex,
 } = require('../controllers/productController');
 //const { getUserById } = require('../controllers/usersController'); // Suponiendo que tienes un método para obtener usuario
 
@@ -33,8 +34,9 @@ productRouter.post('/',
   async (req, res) => {
   try {
     const product = req.body;
-    const newProduct = await postProduct(product, req.files?.image); 
-    res.status(201).send({ status: 'Producto Creado en la Base de Datos', data: newProduct });
+    const images = req.files?.images || req.files?.image;
+    const newProduct = await postProduct(product, images); 
+    res.status(201).send(newProduct);
   } catch (error) {
     res.status(400).send({ error: error.message });
   }
@@ -44,10 +46,9 @@ productRouter.post('/',
 productRouter.put('/:id', 
   verificaToken, verifyAdmin, 
   async (req, res) => {    
-  let image = req.files ? req.files.image : false;
+  const images = req.files?.images || req.files?.image || false;
   try {
-    console.log("ruta put product", req.params.id, req.body, image)
-    const updateProduct = await putProduct(req.params.id, req.body, image);
+    const updateProduct = await putProduct(req.params.id, req.body, images);
     res.status(200).json(updateProduct);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -171,6 +172,19 @@ productRouter.put('/ban/:id',
   try {
     const { id } = req.params;
     const result = await banOrUnban(id);
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Ruta para eliminar una imagen individual de la galería
+productRouter.delete('/:id/images/:index',
+  verificaToken, verifyAdmin,
+  async (req, res) => {
+  try {
+    const { id, index } = req.params;
+    const result = await deleteProductImageByIndex(id, index);
     res.status(200).json(result);
   } catch (error) {
     res.status(400).json({ error: error.message });
