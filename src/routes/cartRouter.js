@@ -26,11 +26,11 @@ cartRouter.get('/', verificaToken, async (req, res) => {
 cartRouter.post('/', verificaToken, async (req, res) => {
   try {
     // console.log(req.body);
-    const { product, user } = req.body;
+    const { product } = req.body;
     const token = req.headers['authorization']?.split(' ')[1];
     const decoded = await jwt.verify(token, process.env.JWT_SECRET);
 
-    const result = await addProductCart(product, user, decoded.userId);
+    const result = await addProductCart(product, decoded.userId);
     // console.log("ruta /post cart . Producto agregado al carrito:", result.cartProducts);
     res.status(200).json(result);
   } catch (error) {
@@ -86,6 +86,22 @@ cartRouter.delete('/deletecart', verificaToken, async (req, res) => {
       res.status(200).json({ message: 'El carrito ha sido eliminado' });
     } catch (error) {
       console.error("Error eliminando el carrito:", error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+// Eliminar o decrementar producto del carrito
+cartRouter.delete('/:prodId', verificaToken, async (req, res) => {
+    try {
+      const { prodId } = req.params;
+      const token = req.headers['authorization']?.split(' ')[1];
+      const decoded = await jwt.verify(token, process.env.JWT_SECRET);
+      const removeAll = req.query.removeAll === 'true';
+
+      const result = await deleteProductCart(prodId, decoded.userId, { removeAll });
+      res.status(200).json(result);
+    } catch (error) {
+      console.error("Error eliminando producto del carrito:", error);
       res.status(400).json({ error: error.message });
     }
   });

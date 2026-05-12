@@ -33,11 +33,12 @@ const envOrigins = [BACK, FRONT]
   .map((origin) => origin.replace(/\/$/, ""));
 
 const whitelist = [
+  "http://localhost:6001/chat/chatpost",
+  "http://localhost:6003",
+  "http://localhost:6002",
+  "http://localhost:6001",
+  "http://localhost:6000",
   "https://hallpa.netlify.app",
-  "https://july-marroquineria.netlify.app",  
-  "https://modatotal.netlify.app",  
-  "https://elgatonegropremium.netlify.app",
-  "https://elgatonegropremium-back-production.up.railway.app",
   "https://api.mercadopago.com",
   "https://sdk.mercadopago.com",
   "https://apis.google.com",

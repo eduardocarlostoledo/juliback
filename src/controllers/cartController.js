@@ -86,7 +86,7 @@ const getCarritoDeUsuario = async (userId) => {
     let tieneCarrito = await Cart.findOne({ where: { cartUserId: userId } });
 
     if (!tieneCarrito) {
-      throw new Error("El usuario no tiene un carrito activo.");
+      return { cartProducts: [] };
     }
 
     // Convertir cartProducts a JSON si viene como string
@@ -102,7 +102,7 @@ const getCarritoDeUsuario = async (userId) => {
   }
 };
 
-const deleteProductCart = async (prodId, userId) => {
+const deleteProductCart = async (prodId, userId, options = {}) => {
   try {
     //console.log(prodId, userId, "deleteProductCart");
     if (!prodId || !userId) {
@@ -115,13 +115,15 @@ const deleteProductCart = async (prodId, userId) => {
 
     let productosEnCarrito = tieneCarrito.cartProducts;
     const productIndex = productosEnCarrito.findIndex(
-      (item) => item.id === prodId
+      (item) => String(item.id) === String(prodId)
     );
 
     if (productIndex === -1)
       throw new Error("El producto no está en el carrito");
 
-    if (productosEnCarrito[productIndex].amount > 1) {
+    if (options.removeAll) {
+      productosEnCarrito.splice(productIndex, 1);
+    } else if (productosEnCarrito[productIndex].amount > 1) {
       productosEnCarrito[productIndex].amount -= 1;
     } else {
       productosEnCarrito.splice(productIndex, 1);
@@ -129,7 +131,7 @@ const deleteProductCart = async (prodId, userId) => {
 
     await tieneCarrito.update({ cartProducts: productosEnCarrito });
 
-    return "Se ha modificado el carrito";
+    return tieneCarrito;
   } catch (error) {
     console.error("Error en deleteProductCart:", error.message);
     throw error;

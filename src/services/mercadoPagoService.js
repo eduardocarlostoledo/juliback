@@ -1,4 +1,5 @@
 const axios = require("axios");
+const crypto = require("crypto");
 const mercadopago = require("mercadopago");
 const { Preference } = require("mercadopago");
 const {
@@ -42,6 +43,104 @@ const getMercadoPagoPayment = async (paymentId) => {
   return response.data;
 };
 
+const normalizeBaseUrl = (url) => url?.trim().replace(/\/$/, "") || "";
+
+const isHttpsUrl = (url) => {
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const getMercadoPagoWebhookUrl = () => {
+  const webhookUrl = normalizeBaseUrl(process.env.WEB_HOOK_MERCADOPAGO);
+
+  if (isHttpsUrl(webhookUrl)) {
+    return webhookUrl;
+  }
+
+  if (webhookUrl) {
+    console.warn(
+      "Mercado Pago: WEB_HOOK_MERCADOPAGO debe ser una URL HTTPS publica. Se ignora en este entorno."
+    );
+  }
+
+  return "";
+};
+
+const buildMercadoPagoReturnConfig = () => {
+  const backUrl = normalizeBaseUrl(process.env.BACK);
+  const webhookUrl = getMercadoPagoWebhookUrl();
+
+  if (!isHttpsUrl(backUrl)) {
+    console.warn(
+      "Mercado Pago: BACK debe ser una URL HTTPS publica para back_urls y auto_return. Se omiten en este entorno."
+    );
+    return webhookUrl ? { notification_url: webhookUrl } : {};
+  }
+
+  return {
+    back_urls: {
+      success: `${backUrl}/pay/feedback/success`,
+      failure: `${backUrl}/pay/feedback/failure`,
+      pending: `${backUrl}/pay/feedback/pending`,
+    },
+    ...(webhookUrl ? { notification_url: webhookUrl } : {}),
+    auto_return: "approved",
+  };
+};
+
+const parseMercadoPagoSignatureHeader = (signatureHeader = "") =>
+  signatureHeader.split(",").reduce((acc, part) => {
+    const [key, value] = part.split("=");
+
+    if (key && value) {
+      acc[key.trim()] = value.trim();
+    }
+
+    return acc;
+  }, {});
+
+const safeCompareHex = (currentHash, expectedHash) => {
+  if (!currentHash || !expectedHash || currentHash.length !== expectedHash.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(currentHash, "hex"),
+    Buffer.from(expectedHash, "hex")
+  );
+};
+
+const verifyMercadoPagoWebhookSignature = (req) => {
+  const secret = process.env.WEB_HOOK_MERCADOPAGO_SECRET;
+
+  if (!secret) {
+    console.warn(
+      "Mercado Pago: WEB_HOOK_MERCADOPAGO_SECRET no esta configurado. Se omite validacion de firma."
+    );
+    return true;
+  }
+
+  const xSignature = req.headers["x-signature"];
+  const xRequestId = req.headers["x-request-id"];
+  const { ts, v1 } = parseMercadoPagoSignatureHeader(xSignature);
+  const dataId = req.query?.["data.id"] || req.body?.data?.id || req.body?.id;
+
+  if (!dataId || !xRequestId || !ts || !v1) {
+    return false;
+  }
+
+  const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
+  const expectedHash = crypto
+    .createHmac("sha256", secret)
+    .update(manifest)
+    .digest("hex");
+
+  return safeCompareHex(v1, expectedHash);
+};
+
 const buildMercadoPagoPreferenceBody = ({ order, user }) => {
   const buyerAddress = normalizeBuyerAddress(order.buyer_address);
   const normalizedProducts = normalizeOrderProducts(order.products);
@@ -54,13 +153,7 @@ const buildMercadoPagoPreferenceBody = ({ order, user }) => {
       unit_price: product.product_unit_price,
       currency_id: "ARS",
     })),
-    back_urls: {
-      success: `${process.env.BACK}/pay/feedback/success`,
-      failure: `${process.env.BACK}/pay/feedback/failure`,
-      pending: `${process.env.BACK}/pay/feedback/pending`,
-    },
-    notification_url: `${process.env.BACK}/pay/webhook`,
-    auto_return: "approved",
+    ...buildMercadoPagoReturnConfig(),
     external_reference: order.id,
     payer: {
       email: user.email,
@@ -130,4 +223,5 @@ module.exports = {
   createMercadoPagoPreference,
   buildMercadoPagoOrderUpdate,
   summarizeMercadoPagoPayment,
+  verifyMercadoPagoWebhookSignature,
 };

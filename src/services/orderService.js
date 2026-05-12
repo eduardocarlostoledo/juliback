@@ -278,7 +278,11 @@ const finalizeApprovedOrder = async (order) => {
     await decrementProductStock(product.prodId, product.product_amount);
   }
 
-  await deleteAllCart(order.userId);
+  const paymentProviderData = normalizeJsonValue(order.payment_provider_data, {});
+
+  if (paymentProviderData.source !== "chatbot") {
+    await deleteAllCart(order.userId);
+  }
 };
 
 module.exports = {

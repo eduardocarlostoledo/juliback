@@ -12,9 +12,73 @@ const {
   createMercadoPagoPreference,
   buildMercadoPagoOrderUpdate,
   summarizeMercadoPagoPayment,
+  verifyMercadoPagoWebhookSignature,
 } = require("../services/mercadoPagoService");
 
 const payRouter = Router();
+
+const normalizeJsonValue = (value, fallback = {}) => {
+  if (value == null) {
+    return fallback;
+  }
+
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  return value;
+};
+
+const getFrontUrl = () => (process.env.FRONT || "").replace(/\/$/, "");
+
+const getOrderSource = (order) =>
+  normalizeJsonValue(order?.payment_provider_data)?.source || null;
+
+const getFirstOrderProductName = (order) => {
+  const products = normalizeJsonValue(order?.products, []);
+
+  return Array.isArray(products) && products[0]?.product_name
+    ? products[0].product_name
+    : "";
+};
+
+const redirectPaymentReturn = (res, order, paymentStatus, query = {}) => {
+  const frontUrl = getFrontUrl();
+
+  if (!frontUrl) {
+    return false;
+  }
+
+  const source = getOrderSource(order);
+
+  if (source === "chatbot") {
+    const params = new URLSearchParams({
+      paymentStatus,
+      order_id: order.id,
+    });
+    const productName = getFirstOrderProductName(order);
+
+    if (productName) {
+      params.set("product", productName);
+    }
+
+    return res.redirect(`${frontUrl}/chatbot?${params.toString()}`);
+  }
+
+  const params = new URLSearchParams({
+    paymentStatus,
+  });
+
+  if (query.external_reference) {
+    params.set("order_id", query.external_reference);
+  }
+
+  return res.redirect(`${frontUrl}/Cart?${params.toString()}`);
+};
 
 payRouter.post("/preference", (req, res) => {
   res.status(410).json({
@@ -25,6 +89,7 @@ payRouter.post("/preference", (req, res) => {
 payRouter.post("/create_preference", verificaToken, async (req, res) => {
   try {
     const { orderData, preferencia } = req.body;
+    console.log("Datos recibidos en /create_preference:", { orderData, preferencia });
 
     if (!orderData || !Array.isArray(preferencia) || preferencia.length === 0) {
       return res.status(400).json({ error: "Datos incompletos" });
@@ -72,6 +137,18 @@ payRouter.post("/create_preference", verificaToken, async (req, res) => {
 });
 
 payRouter.post("/webhook", async (req, res) => {
+  const eventType = req.body?.type || req.query?.type;
+
+  if (eventType && eventType !== "payment") {
+    console.log(`Webhook Mercado Pago ignorado. Evento no soportado: ${eventType}`);
+    return res.sendStatus(200);
+  }
+
+  if (!verifyMercadoPagoWebhookSignature(req)) {
+    console.warn("Webhook Mercado Pago rechazado por firma invalida.");
+    return res.sendStatus(401);
+  }
+
   const paymentId = getPaymentIdFromWebhook(req);
 
   res.sendStatus(200);
@@ -183,7 +260,7 @@ payRouter.get("/feedback/pending", async (req, res) => {
     await order.update({
       payment_id,
       merchant_order_id,
-      status,
+      status: status || "pending",
       preference_id,
       payment_type,
       processing_mode,
@@ -197,6 +274,14 @@ payRouter.get("/feedback/pending", async (req, res) => {
         merchant_order_id: merchant_order_id || null,
       },
     });
+
+    if (
+      redirectPaymentReturn(res, order, "pending", {
+        external_reference,
+      })
+    ) {
+      return;
+    }
 
     res.send(`
       <!DOCTYPE html>
@@ -251,7 +336,7 @@ payRouter.get("/feedback/failure", async (req, res) => {
     await order.update({
       payment_id,
       merchant_order_id,
-      status,
+      status: status || "failure",
       preference_id,
       payment_type,
       processing_mode,
@@ -265,6 +350,14 @@ payRouter.get("/feedback/failure", async (req, res) => {
         merchant_order_id: merchant_order_id || null,
       },
     });
+
+    if (
+      redirectPaymentReturn(res, order, "failure", {
+        external_reference,
+      })
+    ) {
+      return;
+    }
 
     res.send(`
       <!DOCTYPE html>

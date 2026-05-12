@@ -691,39 +691,22 @@ async function getAuthenticatedUserFromRequest(req) {
   }
 }
 
-async function ensureProductInUserCart(user, product) {
+async function getOrCreateUserCartForCheckout(user) {
   let cart = await Cart.findOne({ where: { cartUserId: user.id } });
-  const cartProduct = {
-    id: product.id,
-    name: product.name,
-    price: Number(product.price || 0),
-    image: product.image || null,
-    amount: 1,
-  };
 
   if (!cart) {
     return Cart.create({
       cartUserId: user.id,
-      cartProducts: [cartProduct],
+      cartProducts: [],
       order: Date.now(),
     });
-  }
-
-  const currentProducts = Array.isArray(cart.cartProducts) ? [...cart.cartProducts] : [];
-  const alreadyExists = currentProducts.some(
-    (item) => Number(item.id) === Number(product.id)
-  );
-
-  if (!alreadyExists) {
-    currentProducts.push(cartProduct);
-    await cart.update({ cartProducts: currentProducts });
   }
 
   return cart;
 }
 
 async function createCheckoutForChatSale(user, product) {
-  const cart = await ensureProductInUserCart(user, product);
+  const cart = await getOrCreateUserCartForCheckout(user);
   const preferencia = [buildPreferenceItemFromProduct(product)];
   const orderData = {
     quantity: 1,
@@ -894,7 +877,7 @@ chatRouter.post("/chatpost", async (req, res) => {
             `Ya tengo listo ${selectedProduct.name}. Para disparar la venta y llevarte al cobro, primero inicia sesion y volvemos directo al checkout.`,
             {
               actions: [
-                buildLinkAction("Iniciar sesion", "/login"),
+                buildLinkAction("Iniciar sesion", "/Login"),
                 buildSendMessageAction("Seguir viendo", selectedProduct.name),
               ],
             }
@@ -916,7 +899,7 @@ chatRouter.post("/chatpost", async (req, res) => {
           {
             actions: [
               buildCheckoutAction(checkout),
-              buildLinkAction("Ver carrito", "/cart"),
+              buildLinkAction("Ver carrito", "/Cart"),
             ],
             checkout,
           }
